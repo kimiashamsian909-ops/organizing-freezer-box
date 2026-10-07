@@ -370,7 +370,8 @@ function renderBoxView() {
       h("button", { onclick: () => claimDialog("boxes", box) }, box.claimed_by ? "Change claim" : "Claim box"),
       box.kind === "list" ? h("button.primary", { onclick: () => sampleForm(null, { box_id: box.id }) }, "+ Add sample") : null,
       h("button", { onclick: () => { state.selecting = true; state.moving = null; render(); } }, "Select labels"),
-      h("button", { onclick: () => printLabels(box.samples.map(s => s.id)), disabled: !box.samples.length }, "Print box labels"))));
+      h("button", { onclick: () => printLabels(box.samples.map(s => s.id)), disabled: !box.samples.length }, "Print box labels"),
+      h("button", { onclick: () => downloadCsv(box.id), disabled: !box.samples.length }, "Export box CSV"))));
 
   if (box.kind !== "list") {
     wrap.append(h("div.toolbar", null,
@@ -864,6 +865,97 @@ async function printLabels(ids) {
   setTimeout(() => window.print(), 50);
 }
 
+// ---------- CSV import / export ----------
+
+function saveFile(blob, filename) {
+  const a = h("a", { href: URL.createObjectURL(blob), download: filename });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// fetch (not a plain link) so the passcode header goes along.
+async function downloadCsv(boxId) {
+  const res = await fetch("/api/export.csv" + (boxId ? "?box_id=" + boxId : ""),
+    { headers: { "X-Passcode": load("passcode", ""), "X-User": encodeURIComponent(load("user", "")) } });
+  if (!res.ok) { toast("Export failed", true); return; }
+  const name = (/filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "") || [])[1] || "freezer-samples.csv";
+  saveFile(await res.blob(), name);
+  toast("Downloaded " + name);
+}
+
+function downloadTemplate() {
+  const csv = "freezer,rack,box,box_type,position,name,type,date,owner,notes\n" +
+    "-80 °C Freezer A,Rack 1,Box 01,9x9,A1,MNV-1 P3 stock,Virus stock,2025-03-14,Your Name,Titer 1e7 PFU/mL\n" +
+    "-80 °C Freezer A,Rack 1,Large tubes,list,,Serum pool 1,Serum,2025-04-02,Your Name,\n";
+  saveFile(new Blob(["\ufeff" + csv], { type: "text/csv" }), "freezer-import-template.csv");
+}
+
+function csvDialog() {
+  const out = h("div");
+  const file = h("input", { type: "file", accept: ".csv,.tsv,.txt,text/csv",
+    onchange: async () => {
+      const f = file.files[0];
+      if (!f) return;
+      out.replaceChildren(h("div.muted", null, "Checking " + f.name + "…"));
+      try {
+        const text = await f.text();
+        const report = await api("POST", "/api/import", { csv: text, commit: false });
+        out.replaceChildren(importPreview(report, text, f.name));
+      } catch (e) { out.replaceChildren(h("div.error", null, e.message)); }
+    } });
+  dialog.classList.add("wide");
+  openDialog(h("div", null,
+    h("h3", null, "Import / Export"),
+    h("div.sub", null, "CSV files open in Excel, Numbers and Google Sheets."),
+    h("div.csv-section", null,
+      h("h4", null, "Export"),
+      h("div.actions", { style: { justifyContent: "flex-start", marginTop: 0 } },
+        h("button.primary", { onclick: () => downloadCsv() }, "Export all samples"),
+        state.box && state.tab === "boxes" ? h("button", { onclick: () => downloadCsv(state.box.id) }, "Export " + state.box.name) : null)),
+    h("div.csv-section", null,
+      h("h4", null, "Import"),
+      h("p.muted", { style: { margin: "0 0 8px" } },
+        "Columns: freezer, rack, box, box_type (9x9 / 10x10 / list), position (A1…J10), name, type, date, owner, notes. ",
+        "Only name is required. Missing freezers, racks, boxes and lab mates are created. You'll see a preview before anything is saved."),
+      h("div.actions", { style: { justifyContent: "flex-start", marginTop: 0 } },
+        file, h("button.link", { onclick: downloadTemplate }, "Download a template")),
+      out),
+    h("div.actions", null, h("button", { onclick: () => closeDialog() }, "Close"))));
+}
+
+function importPreview(report, text, filename) {
+  const c = report.created;
+  const created = [["freezers", c.freezers], ["racks", c.racks], ["boxes", c.boxes], ["lab mates", c.members]]
+    .filter(([, list]) => list.length)
+    .map(([what, list]) => h("li", null, list.length + " new " + what + ": " + list.slice(0, 8).join(", ") + (list.length > 8 ? "…" : "")));
+  const problems = report.errors.map(e => ({ line: e.line, name: e.name, msg: e.error }))
+    .concat(report.skipped.map(s => ({ line: s.line, name: s.name, msg: "skipped: " + s.reason })))
+    .sort((a, b) => a.line - b.line);
+  const go = h("button.primary", { disabled: !report.added, onclick: async () => {
+    go.disabled = true;
+    try {
+      const done = await api("POST", "/api/import", { csv: text, commit: true });
+      closeDialog();
+      toast("Imported " + done.added + " samples from " + filename);
+      refresh();
+    } catch (e) { go.disabled = false; toast(e.message, true); }
+  } }, "Import " + report.added + " samples");
+  return h("div", { style: { marginTop: "12px" } },
+    h("div", null, h("b", null, filename), ": " + report.rows + " rows. Matched columns: ",
+      h("span.muted", null, Object.entries(report.columns).map(([k, v]) => v === k ? k : v + " → " + k).join(", "))),
+    h("ul.summary-list", null,
+      h("li", null, h("b", null, report.added + " samples"), " ready to import"),
+      created,
+      problems.length ? h("li", null, h("b", null, problems.length + " rows"), " will be left out (listed below)") : null),
+    problems.length ? h("div.import-errors", null, h("table.data", null,
+      h("thead", null, h("tr", null, h("th", null, "Row"), h("th", null, "Sample"), h("th", null, "Problem"))),
+      h("tbody", null, problems.map(p => h("tr", null, h("td", null, p.line), h("td", null, p.name || "—"), h("td", null, p.msg)))))) : null,
+    h("div.actions", null, go));
+}
+
+dialog.addEventListener("close", () => dialog.classList.remove("wide"));
+
 // ---------- wiring ----------
 
 document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", async () => {
@@ -879,6 +971,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); runSearch($("#search").value); });
 $("#search").addEventListener("search", e => { if (!e.target.value) clearSearch(); });
 $("#whoami").addEventListener("click", () => askWho(true));
+$("#csv-btn").addEventListener("click", csvDialog);
 
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !dialog.open) {

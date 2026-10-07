@@ -13,6 +13,9 @@ A shared freezer sample tracker for the lab. It records freezers → racks → b
   - "Find room" highlights boxes with enough free, unclaimed spots
   - Putting a sample into someone else's claimed box or reserved spot asks you to confirm first.
 - **Labels:** print a sheet of text labels for one sample, a selection, or a whole box.
+- **Import / Export (CSV):**
+  - **Export** everything, or one box, as a spreadsheet for Excel, Numbers or Google Sheets.
+  - **Import** a spreadsheet to load an existing inventory. A preview shows what will be added or created, and which rows have problems, before anything is saved.
 
 Only the Python 3 that comes with macOS is needed. There is nothing to install.
 
@@ -68,6 +71,20 @@ Without a `config.json`, the server only listens on this Mac (127.0.0.1) and has
 | `backup_dir`, `backup_keep_days` | nightly backup location and how many days to keep |
 
 `freezer.db` and `config.json` are in `.gitignore`, so lab data and the passcode never go to GitHub.
+
+## CSV import format
+
+Columns (any order; common header names like "Sample Name" or "Date Frozen" are recognised):
+
+`freezer, rack, box, box_type, position, name, type, date, owner, notes`
+
+- Only `name` is required. A missing freezer, rack or box is filed under "Imported".
+- `position` is `A1`–`J10`, left blank for no-grid boxes.
+- New boxes get their type from `box_type` (`9x9`, `10x10`, `list`). Without it, the type is guessed from the positions used.
+- Freezers, racks, boxes and lab mates that don't exist yet are created.
+- Rows with problems are skipped and listed, e.g. a spot that's taken, a position outside the box, or no name.
+- Dates like `3/14/2025` become `2025-03-14`.
+- An exported file is a valid import file. Re-importing it skips samples already in the tracker.
 
 ## Tests
 

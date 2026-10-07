@@ -164,6 +164,12 @@ dl.props dt { color: var(--muted); font-size: 12px; }
 dl.props dd { margin: 0; white-space: pre-wrap; }
 .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
 .error { color: var(--danger); margin-top: 8px; }
+dialog.wide { width: min(720px, 94vw); }
+.import-errors { max-height: 220px; overflow: auto; margin-top: 8px; font-size: 12px; }
+.import-errors table.data th, .import-errors table.data td { padding: 4px 8px; }
+.summary-list { margin: 6px 0; padding-left: 18px; }
+.csv-section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+.csv-section h4 { margin: 0 0 6px; }
 .mini-history { max-height: 180px; overflow: auto; font-size: 12px; border-top: 1px solid var(--line); margin-top: 10px; padding-top: 6px; }
 .mini-history div { padding: 3px 0; }
 

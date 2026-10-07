@@ -9,11 +9,15 @@ import mimetypes
 import os
 import re
 import sqlite3
+import sys
 import threading
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+
+# csvio imports this module as "server"; make that the running module, not a second copy.
+sys.modules.setdefault("server", sys.modules[__name__])
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
@@ -26,6 +30,15 @@ class ApiError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+class Raw:
+    """A non-JSON response, e.g. a CSV download."""
+
+    def __init__(self, body, ctype, filename=None):
+        self.body = body.encode() if isinstance(body, str) else body
+        self.ctype = ctype
+        self.filename = filename
 
 
 class NeedsConfirm(Exception):
@@ -633,6 +646,22 @@ def r_history(store, m, body, qs, user):
                          limit=_int(qs.get("limit")) or 200, offset=_int(qs.get("offset")) or 0)
 
 
+@route("GET", r"/api/export\.csv")
+def r_export(store, m, body, qs, user):
+    import csvio
+    box_id = _int(qs.get("box_id"))
+    name = "freezer-samples-%s.csv" % datetime.now().strftime("%Y-%m-%d")
+    if box_id:
+        name = "box-%s-%s" % (re.sub(r"[^A-Za-z0-9]+", "-", store._get("boxes", box_id, "Box")["name"]).strip("-"), name)
+    return Raw(csvio.export_csv(store, box_id), "text/csv; charset=utf-8", name)
+
+
+@route("POST", r"/api/import")
+def r_import(store, m, body, qs, user):
+    import csvio
+    return csvio.import_csv(store, body.get("csv") or "", user, commit=bool(body.get("commit")))
+
+
 @route("GET", r"/api/whos-where")
 def r_whos_where(store, m, body, qs, user):
     return store.whos_where()
@@ -646,9 +675,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, status, payload, ctype="application/json"):
+        filename = None
+        if isinstance(payload, Raw):
+            payload, ctype, filename = payload.body, payload.ctype, payload.filename
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", ctype)
+        if filename:
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
