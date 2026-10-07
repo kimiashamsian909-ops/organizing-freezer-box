@@ -1,0 +1,8 @@
+{
+  "host": "0.0.0.0",
+  "port": 8000,
+  "db": "freezer.db",
+  "passcode": "change-me",
+  "backup_dir": "/Volumes/MTB_Lab/FreezerTracker/backups",
+  "backup_keep_days": 30
+}
