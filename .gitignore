@@ -1,0 +1,6 @@
+freezer.db
+freezer.db-*
+config.json
+__pycache__/
+*.pyc
+.DS_Store
